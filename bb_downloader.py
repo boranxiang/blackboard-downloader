@@ -31,9 +31,6 @@ FOLDER_HANDLERS = {
     "resource/x-bb-lesson",
 }
 
-DEFAULT_EXTENSIONS = {".pdf"}
-
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 def wait_for_login(driver, base_url):
@@ -327,6 +324,8 @@ def _extract_from_body(body, base_url, extensions):
 def _matches(filename, mime, extensions):
     """Check if a file matches the requested extensions."""
     ext = Path(filename).suffix.lower()
+    if extensions is None:
+        return bool(ext or mime)
     if ext in extensions:
         return True
     # fallback: check mime type for common types
@@ -396,7 +395,7 @@ Examples:
         "--ext",
         nargs="+",
         default=None,
-        help="File extensions to download, e.g. --ext .pdf .pptx .docx (prompted if not provided)"
+        help="File extensions to download, e.g. --ext .pdf .pptx .docx (default: all)"
     )
     parser.add_argument(
         "--courses",
@@ -416,21 +415,6 @@ def prompt_url():
     return raw
 
 
-def prompt_extensions():
-    print("\nFile types to download (space-separated, e.g: .pdf .pptx .docx)")
-    print("Press Enter for PDF only:")
-    raw = input("  > ").strip()
-    if not raw:
-        return DEFAULT_EXTENSIONS
-    exts = set()
-    for e in raw.split():
-        e = e.lower()
-        if not e.startswith("."):
-            e = f".{e}"
-        exts.add(e)
-    return exts
-
-
 def main():
     args = parse_args()
 
@@ -442,8 +426,9 @@ def main():
     else:
         base_url = prompt_url()
 
-    extensions = set(args.ext) if args.ext else prompt_extensions()
-    print(f"\nFile types: {', '.join(sorted(extensions))}")
+    extensions = set(args.ext) if args.ext else None
+    file_types = ", ".join(sorted(extensions)) if extensions else "all"
+    print(f"\nFile types: {file_types}")
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)

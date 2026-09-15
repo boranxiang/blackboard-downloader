@@ -38,10 +38,12 @@ python3 bb_downloader.py
 ```
 
 The script will ask for:
+
 1. Your Blackboard domain (e.g. `learn.bu.edu`)
-2. File types to download (default: `.pdf`)
-3. Which term to download
-4. Which modules within that term (e.g. `1,3,5` or `1-3` or `all`)
+2. Which term to download
+3. Which modules within that term (e.g. `1,3,5` or `1-3` or `all`)
+
+By default, the script downloads every file type. Pass `--ext` to limit downloads to specific extensions.
 
 ### Command-line flags
 
@@ -56,7 +58,7 @@ python3 bb_downloader.py \
 |------|-------------|---------|
 | `--url` | Blackboard domain | prompted |
 | `--output` | Download folder | `~/Downloads/Blackboard` |
-| `--ext` | File extensions | prompted (default `.pdf`) |
+| `--ext` | File extensions | all extensions |
 | `--courses` | Course names/IDs to download (substring match). Skips the interactive picker. | prompted |
 
 ### Output structure
