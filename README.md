@@ -6,6 +6,7 @@ Automatically download course files from any **Blackboard Learn** instance. Supp
 
 - Works with any Blackboard Learn school (just enter your domain)
 - Lists all your terms and lets you pick which one to download
+- Pick exactly which modules to download (or use `--courses` to script it)
 - Preserves top-level folder structure from Blackboard
 - Skips files you've already downloaded
 - Supports any file type: PDF, PPTX, DOCX, etc.
@@ -19,7 +20,7 @@ Automatically download course files from any **Blackboard Learn** instance. Supp
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/blackboard-downloader.git
+git clone https://github.com/mbdalpha/blackboard-downloader.git
 cd blackboard-downloader
 
 python3 -m venv venv
@@ -37,9 +38,12 @@ python3 bb_downloader.py
 ```
 
 The script will ask for:
+
 1. Your Blackboard domain (e.g. `learn.bu.edu`)
-2. File types to download (default: `.pdf`)
-3. Which term to download
+2. Which term to download
+3. Which modules within that term (e.g. `1,3,5` or `1-3` or `all`)
+
+By default, the script downloads every file type. Pass `--ext` to limit downloads to specific extensions.
 
 ### Command-line flags
 
@@ -54,7 +58,8 @@ python3 bb_downloader.py \
 |------|-------------|---------|
 | `--url` | Blackboard domain | prompted |
 | `--output` | Download folder | `~/Downloads/Blackboard` |
-| `--ext` | File extensions | prompted (default `.pdf`) |
+| `--ext` | File extensions | all extensions |
+| `--courses` | Course names/IDs to download (substring match). Skips the interactive picker. | prompted |
 
 ### Output structure
 
@@ -84,7 +89,7 @@ Blackboard/
 
 - **Re-running is safe** — already downloaded files are skipped
 - **External links are not downloaded** (e.g. files hosted on Google Drive or OneDrive)
-- Tested on Blackboard Learn SaaS (Ultra experience) at Boston University (learn.bu.edu)
+- Tested on Blackboard Learn SaaS (Ultra experience) at Boston University (learn.bu.edu) and Trinity College Dublin (tcd.blackboard.com)
 
 ## Contributing
 

@@ -25,8 +25,11 @@ CONTAINER_HANDLERS = {
     "resource/x-bb-blankpage",
 }
 
-DEFAULT_EXTENSIONS = {".pdf"}
-
+# Nodes that should create a subfolder on disk when recursed into.
+FOLDER_HANDLERS = {
+    "resource/x-bb-folder",
+    "resource/x-bb-lesson",
+}
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -140,12 +143,86 @@ def pick_term(term_map):
             all_courses = [c for courses in term_map.values() for c in courses]
             return all_courses
         if raw.isdigit() and 1 <= int(raw) <= len(terms):
-            selected = term_map[terms[int(raw) - 1]]
-            print(f"\nCourses in selected term:")
-            for c in selected:
-                print(f"  - {c['name']}")
-            return selected
+            return term_map[terms[int(raw) - 1]]
         print("  Invalid input, try again.")
+
+
+def pick_courses(courses):
+    """
+    Interactive multi-select course picker.
+    Accepts: 'all' / blank, comma-separated indices, hyphen ranges, or a mix
+    (e.g. '1,3,5', '1-3', '1-3,5,7-9'). Returns the chosen subset in original order.
+    """
+    print("\nCourses in selected term:")
+    for i, c in enumerate(courses, 1):
+        print(f"  [{i}] {c['name']}")
+    print("\nEnter course numbers to download (e.g. 1,3,5 or 1-3,5).")
+    print("Press Enter or type 'all' for every course.")
+
+    while True:
+        raw = input("  > ").strip().lower()
+        if raw == "" or raw == "all":
+            return courses
+
+        chosen = set()
+        ok = True
+        for token in raw.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if "-" in token:
+                parts = token.split("-")
+                if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                    ok = False
+                    break
+                a, b = int(parts[0]), int(parts[1])
+                if a > b:
+                    a, b = b, a
+                for n in range(a, b + 1):
+                    if not 1 <= n <= len(courses):
+                        ok = False
+                        break
+                    chosen.add(n)
+                if not ok:
+                    break
+            else:
+                if not token.isdigit():
+                    ok = False
+                    break
+                n = int(token)
+                if not 1 <= n <= len(courses):
+                    ok = False
+                    break
+                chosen.add(n)
+
+        if not ok or not chosen:
+            print("  Invalid input, try again.")
+            continue
+
+        selected = [courses[i - 1] for i in sorted(chosen)]
+        print("\nSelected courses:")
+        for c in selected:
+            print(f"  - {c['name']}")
+        return selected
+
+
+def filter_courses_by_query(courses, queries):
+    """Filter courses by case-insensitive substring match against name or course code."""
+    queries_lc = [q.lower() for q in queries]
+    matched = []
+    seen_match = {q: False for q in queries_lc}
+    for c in courses:
+        name_lc = c["name"].lower()
+        code_lc = c.get("course_code", "").lower()
+        for q in queries_lc:
+            if q in name_lc or q in code_lc:
+                matched.append(c)
+                seen_match[q] = True
+                break
+    for q, hit in seen_match.items():
+        if not hit:
+            print(f"  Warning: no course matched '{q}'")
+    return matched
 
 
 # ── Content traversal ─────────────────────────────────────────────────────────
@@ -166,16 +243,19 @@ def get_top_level_sections(session, base_url, course_id):
 def collect_files_recursive(session, base_url, course_id, item_id, extensions):
     """
     Recursively collect all downloadable files under item_id.
-    Returns list of {"url": ..., "filename": ...}
+    Returns list of {"url": ..., "filename": ..., "rel_path": [folder, subfolder, ...]}
+    where rel_path mirrors the Blackboard folder/lesson hierarchy below item_id.
     """
     files = []
 
-    def fetch(node_id):
+    def fetch(node_id, rel_path):
         # Fetch node detail (contains body HTML)
         detail_resp = session.get(f"{base_url}/learn/api/public/v1/courses/{course_id}/contents/{node_id}")
         if detail_resp.status_code == 200:
             body = detail_resp.json().get("body", "")
-            files.extend(_extract_from_body(body, base_url, extensions))
+            for f in _extract_from_body(body, base_url, extensions):
+                f["rel_path"] = list(rel_path)
+                files.append(f)
 
         # Fetch traditional attachments
         att_resp = session.get(f"{base_url}/learn/api/public/v1/courses/{course_id}/contents/{node_id}/attachments")
@@ -188,7 +268,7 @@ def collect_files_recursive(session, base_url, course_id, item_id, extensions):
                         f"{base_url}/learn/api/public/v1/courses/{course_id}"
                         f"/contents/{node_id}/attachments/{att['id']}/download"
                     )
-                    files.append({"url": dl_url, "filename": filename})
+                    files.append({"url": dl_url, "filename": filename, "rel_path": list(rel_path)})
 
         # Recurse into children
         children_resp = session.get(
@@ -196,9 +276,17 @@ def collect_files_recursive(session, base_url, course_id, item_id, extensions):
         )
         if children_resp.status_code == 200:
             for child in children_resp.json().get("results", []):
-                fetch(child.get("id"))
+                child_id = child.get("id")
+                if not child_id:
+                    continue
+                handler = (child.get("contentHandler") or {}).get("id", "")
+                if handler in FOLDER_HANDLERS:
+                    child_name = _safe(child.get("title", "Untitled"))
+                    fetch(child_id, rel_path + [child_name])
+                else:
+                    fetch(child_id, rel_path)
 
-    fetch(item_id)
+    fetch(item_id, [])
     return files
 
 
@@ -236,6 +324,8 @@ def _extract_from_body(body, base_url, extensions):
 def _matches(filename, mime, extensions):
     """Check if a file matches the requested extensions."""
     ext = Path(filename).suffix.lower()
+    if extensions is None:
+        return bool(ext or mime)
     if ext in extensions:
         return True
     # fallback: check mime type for common types
@@ -288,6 +378,7 @@ def parse_args():
 Examples:
   python3 bb_downloader.py
   python3 bb_downloader.py --url learn.bu.edu --output ~/Desktop/BB --ext .pdf .pptx
+  python3 bb_downloader.py --courses CSU33012 "Machine Learning"
         """
     )
     parser.add_argument(
@@ -304,7 +395,14 @@ Examples:
         "--ext",
         nargs="+",
         default=None,
-        help="File extensions to download, e.g. --ext .pdf .pptx .docx (prompted if not provided)"
+        help="File extensions to download, e.g. --ext .pdf .pptx .docx (default: all)"
+    )
+    parser.add_argument(
+        "--courses",
+        nargs="+",
+        default=None,
+        help="Course names or IDs to download (substring match, case-insensitive). "
+             "Skips the interactive course picker. Example: --courses CSU33012 'Machine Learning'"
     )
     return parser.parse_args()
 
@@ -315,21 +413,6 @@ def prompt_url():
     if not raw.startswith("http"):
         raw = f"https://{raw}"
     return raw
-
-
-def prompt_extensions():
-    print("\nFile types to download (space-separated, e.g: .pdf .pptx .docx)")
-    print("Press Enter for PDF only:")
-    raw = input("  > ").strip()
-    if not raw:
-        return DEFAULT_EXTENSIONS
-    exts = set()
-    for e in raw.split():
-        e = e.lower()
-        if not e.startswith("."):
-            e = f".{e}"
-        exts.add(e)
-    return exts
 
 
 def main():
@@ -343,8 +426,9 @@ def main():
     else:
         base_url = prompt_url()
 
-    extensions = set(args.ext) if args.ext else prompt_extensions()
-    print(f"\nFile types: {', '.join(sorted(extensions))}")
+    extensions = set(args.ext) if args.ext else None
+    file_types = ", ".join(sorted(extensions)) if extensions else "all"
+    print(f"\nFile types: {file_types}")
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -377,6 +461,13 @@ def main():
             return
 
         courses = pick_term(term_map)
+        if args.courses:
+            courses = filter_courses_by_query(courses, args.courses)
+            if not courses:
+                print("No courses matched --courses filter.")
+                return
+        else:
+            courses = pick_courses(courses)
 
         print(f"\nStarting download for {len(courses)} course(s)...\n")
         total = 0
@@ -395,7 +486,8 @@ def main():
                 section_dir = course_dir / section["name"]
                 files = collect_files_recursive(session, base_url, course["id"], section["id"], extensions)
                 for f in files:
-                    dest = section_dir / _safe(f["filename"])
+                    subdirs = [_safe(p) for p in f.get("rel_path", []) if p]
+                    dest = section_dir.joinpath(*subdirs, _safe(f["filename"]))
                     if download_file(session, f["url"], dest):
                         total += 1
 
