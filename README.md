@@ -20,7 +20,7 @@ Automatically download course files from any **Blackboard Learn** instance. Supp
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/blackboard-downloader.git
+git clone https://github.com/mbdalpha/blackboard-downloader.git
 cd blackboard-downloader
 
 python3 -m venv venv
